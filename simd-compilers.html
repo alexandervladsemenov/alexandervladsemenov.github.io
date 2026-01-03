@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C Compilers Still Can't Do SIMD</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.7;
+            color: #333;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        
+        article {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 0.5em;
+            color: #1a1a1a;
+            line-height: 1.2;
+        }
+        
+        h2 {
+            font-size: 1.8em;
+            margin-top: 1.5em;
+            margin-bottom: 0.7em;
+            color: #2a2a2a;
+        }
+        
+        h3 {
+            font-size: 1.4em;
+            margin-top: 1.3em;
+            margin-bottom: 0.5em;
+            color: #3a3a3a;
+        }
+        
+        p {
+            margin-bottom: 1.2em;
+        }
+        
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.9em;
+            color: #d63384;
+        }
+        
+        pre {
+            background: #282c34;
+            color: #abb2bf;
+            padding: 20px;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 1.5em 0;
+            line-height: 1.5;
+        }
+        
+        pre code {
+            background: none;
+            color: inherit;
+            padding: 0;
+            font-size: 0.85em;
+        }
+        
+        .note {
+            background: #e8f4f8;
+            border-left: 4px solid #0066cc;
+            padding: 15px 20px;
+            margin: 1.5em 0;
+        }
+        
+        .benchmark {
+            background: #fff9e6;
+            border-left: 4px solid #ffa500;
+            padding: 15px 20px;
+            margin: 1.5em 0;
+        }
+        
+        .conclusion {
+            background: #f0f0f0;
+            padding: 20px;
+            border-radius: 5px;
+            margin-top: 2em;
+        }
+        
+        a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+        
+        a:hover {
+            text-decoration: underline;
+        }
+        
+        .meta {
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 2em;
+            padding-bottom: 1em;
+            border-bottom: 1px solid #eee;
+        }
+        
+        strong {
+            color: #1a1a1a;
+        }
+        
+        @media (max-width: 768px) {
+            article {
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 2em;
+            }
+            
+            pre {
+                padding: 15px;
+                font-size: 0.8em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <article>
+        <h1>C Compilers Still Can't Do SIMD</h1>
+        
+        <div class="meta">
+            A deep dive into why hand-written assembly still matters for high-performance code
+        </div>
+
+        <p>Followers of the ffmpeg project know that the maintainers often emphasize that to achieve top performance in a hot path, you need to use hand-written assembly. For those who come from high-level language programming and/or have never focused on achieving high performance, this may come off as boastful show-off and a waste of time rather than something that actually needs to be done. Indeed, compilers nowadays are amazing. Programmers who work in systems programming or high-frequency trading (HFT), where top performance is a requirement, very rarely (if ever) use hand-written assembly. So, why bother?</p>
+
+        <p>Well, as a scientific programmer I can say that while C/C++/Rust compilers are amazing in many ways, there is still one thing they can't get consistently right, and that's SIMD.</p>
+
+        <h2>What is SIMD?</h2>
+
+        <p>For those who don't know, SIMD stands for <strong>Single Instruction Multiple Data</strong>. In a nutshell, it's a neat way to vectorize most common operations such as addition, subtraction, multiplication, etc.</p>
+
+        <p>Consider this piece of code:</p>
+
+        <pre><code>#include &lt;cstdio&gt;
+void test(const int *a, const int *b, int *c, size_t N)
+{
+    for(size_t i = 0; i &lt; N; i++)
+    {
+        c[i] = a[i] + b[i];
+    }
+}</code></pre>
+
+        <h3>Without Optimization (-O0)</h3>
+
+        <p>Here's the x86-x64 assembly produced by gcc with no optimization:</p>
+
+        <pre><code>test(int const*, int const*, int*, unsigned long):
+        push    rbp
+        mov     rbp, rsp
+        mov     QWORD PTR [rbp-24], rdi
+        mov     QWORD PTR [rbp-32], rsi
+        mov     QWORD PTR [rbp-40], rdx
+        mov     QWORD PTR [rbp-48], rcx
+        mov     QWORD PTR [rbp-8], 0
+        jmp     .L2
+.L3:
+        mov     rax, QWORD PTR [rbp-8]
+        lea     rdx, [0+rax*4]
+        mov     rax, QWORD PTR [rbp-24]
+        add     rax, rdx
+        mov     ecx, DWORD PTR [rax]
+        mov     rax, QWORD PTR [rbp-8]
+        lea     rdx, [0+rax*4]
+        mov     rax, QWORD PTR [rbp-32]
+        add     rax, rdx
+        mov     edx, DWORD PTR [rax]
+        mov     rax, QWORD PTR [rbp-8]
+        lea     rsi, [0+rax*4]
+        mov     rax, QWORD PTR [rbp-40]
+        add     rax, rsi
+        add     edx, ecx
+        mov     DWORD PTR [rax], edx
+        add     QWORD PTR [rbp-8], 1
+.L2:
+        mov     rax, QWORD PTR [rbp-8]
+        cmp     rax, QWORD PTR [rbp-48]
+        jb      .L3
+        nop
+        nop
+        pop     rbp
+        ret</code></pre>
+
+        <p>The most relevant part is <code>.L3</code> where the addition happens. It does what it's supposed to: load data from arrays <code>a</code> and <code>b</code> into registers for each <code>i</code>, add them, and store the result back to <code>c</code>.</p>
+
+        <h3>With SIMD Optimization (-O3 -mavx2)</h3>
+
+        <p>But what happens if we build the same piece of code in optimized mode with the flags <code>-O3 -mavx2</code>?</p>
+
+        <pre><code>test(int const*, int const*, int*, unsigned long):
+        test    rcx, rcx
+        je      .L33
+        lea     r8, [rcx-1]
+        cmp     r8, 2
+        jbe     .L12
+        ; ... (alignment checks) ...
+.L5:
+        vmovdqu ymm0, YMMWORD PTR [rsi+rax]
+        vpaddd  ymm0, ymm0, YMMWORD PTR [rdi+rax]
+        vmovdqu YMMWORD PTR [rdx+rax], ymm0
+        add     rax, 32
+        cmp     rax, r8
+        jne     .L5
+        ; ... (tail handling) ...
+.L4:
+        vmovdqu xmm0, XMMWORD PTR [rsi+rax*4]
+        vpaddd  xmm0, xmm0, XMMWORD PTR [rdi+rax*4]
+        vmovdqu XMMWORD PTR [rdx+rax*4], xmm0
+        ; ... handles remainder ...
+.L7:
+        mov r8d, DWORD PTR [rsi+rax*4]
+        add r8d, DWORD PTR [rdi+rax*4]
+        mov DWORD PTR [rdx+rax*4], r8d
+        ; ... repeat 2 more times ...
+</code></pre>
+
+        <p>The output seems complicated, but it's really not. The main loop is now represented by blocks <code>.L4</code>, <code>.L7</code>, and <code>.L5</code>. Instead of standard <code>add</code> and <code>mov</code> calls, we have SIMD instructions like <code>vmovdqu</code> and <code>vpaddd</code>. What are those? And why are they better?</p>
+
+        <div class="note">
+            <strong>Key Insight:</strong> Instead of computing the sum for each integer element <code>i</code> separately, we do it once for 4 or 8 integers at once. Block <code>.L5</code> loads 8 integers into the <code>ymm0</code> register (which is 256 bits wide), adds them together, and this is done for the first N – mod(N,8) integers. The remaining mod(N,8) elements (the tail) are processed by block <code>.L4</code> using a 128-bit register (4 integers at once), and finally the remainder mod(mod(N,8),4) is processed by block <code>.L7</code>, each integer separately.
+        </div>
+
+        <p>For example, if N = 1029, block <code>.L5</code> will be invoked 128 times to process 128 × 8 = 1024 elements, and the remaining 5 will be processed in blocks <code>.L4</code> and <code>.L7</code>.</p>
+
+        <h2>Is It Actually Faster?</h2>
+
+        <p>To answer this question, let's recall two key factors that determine the performance of a specific instruction: <strong>latency</strong> and <strong>throughput</strong>.</p>
+
+        <ul style="margin-left: 2em; margin-bottom: 1.2em;">
+            <li><strong>Latency</strong> is the time it takes for a single operation to complete from start to finish. It's measured as the number of clock cycles from when the instruction receives its inputs to when the result is available. <code>vpaddd</code> has 1-cycle latency, meaning the result is ready 1 cycle after the inputs are ready.</li>
+            <li style="margin-top: 0.5em;"><strong>Throughput</strong> is how many operations can be completed per unit of time when running many operations in a pipeline.</li>
+        </ul>
+
+        <p>For example, suppose we want to add 1000 numbers:</p>
+        
+        <ul style="margin-left: 2em; margin-bottom: 1.2em;">
+            <li>If each addition takes 4 cycles but you can start a new addition every cycle (throughput = 1/cycle), then the total execution is 1000 + 4 = 1004 cycles (startup + pipeline filling).</li>
+            <li style="margin-top: 0.5em;">On the other hand, if each addition takes 1 cycle (latency = 1), but you can only start a new addition every 4 cycles (throughput = 0.25/cycle), then the total time ≈ 1000 × 4 = 4000 cycles.</li>
+        </ul>
+
+        <p>Typically, both <code>vpaddd</code> and <code>add</code> have the same latency of 1 cycle. However, <code>add</code> has a higher throughput of 4 per cycle vs. 2 per cycle for <code>vpaddd</code>. Thus:</p>
+
+        <ul style="margin-left: 2em; margin-bottom: 1.2em;">
+            <li><code>vpaddd</code> can process: 2 ops/cycle × 8 elements = <strong>16 elements/cycle</strong></li>
+            <li><code>add</code> can process: 4 ops/cycle × 1 element = <strong>4 elements/cycle</strong></li>
+        </ul>
+
+        <p>So using vector registers can be highly beneficial for speeding up parallelized workflows, which are widely used in scientific computing, video, audio, and image processing.</p>
+
+        <h2>The Problem: Compilers Still Fail</h2>
+
+        <p>However, in quite a few cases, modern C/C++ compilers (at the moment of writing, clang 21 and gcc 15) still fail to produce optimized assembly and take advantage of SIMD registers. Below I'll consider such a toy example.</p>
+
+        <pre><code>#include &lt;iostream&gt;
+#include &lt;random&gt;
+#include &lt;vector&gt;
+#include &lt;cmath&gt;
+
+int main(int argc, char **argv) {
+    int N = 10'000;
+    float sigma = 1;
+    int radius = 3;
+    if (argc > 1) {
+        N = std::stoi(argv[1]);
+    }
+    if (argc > 2) {
+        radius = std::stoi(argv[2]);
+    }
+    if (argc > 3) {
+        sigma = std::stof(argv[3]);
+    }
+
+    std::vector&lt;float&gt; array(N * N), results(N * N);
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution&lt;&gt; dis(0, 1.0);
+    int sample_size = N * N;
+    for (auto& val : array) {
+        val = dis(gen);
+    }
+    size_t total_count = 0;
+
+    for (int i = 0; i &lt; N; ++i) {
+        for (int j = 0; j &lt; N; ++j) {
+            const int imax = std::min(i + radius, N - 1);
+            const int imin = std::max(i - radius, 0);
+            const int jmax = std::min(j + radius, N - 1);
+            const int jmin = std::max(j - radius, 0);
+            const int index_global = N * i + j;
+            const float center_val = array[i * N + j];
+            float sum_weights = 0.0f;
+            float sum_weighted = 0.0f;
+
+            for (int ii = imin; ii &lt;= imax; ++ii) {
+                for (int jj = jmin; jj &lt;= jmax; ++jj) {
+                    total_count++;
+                    int index_local = N * ii + jj;
+                    const float diff = center_val - array[index_local];
+                    const float w = std::exp(-diff * diff / sigma / sigma / 2);
+                    sum_weights += w;
+                    sum_weighted += array[index_local] * w;
+                }
+            }
+            results[index_global] = sum_weighted / sum_weights;
+        }
+    }
+    std::cout &lt;&lt; "Average " &lt;&lt; std::accumulate(results.begin(), results.end(), 0.0) / sample_size &lt;&lt; std::endl;
+    std::cout &lt;&lt; "Total Count " &lt;&lt; total_count &lt;&lt; std::endl;
+    return 0;
+}</code></pre>
+
+        <p>This is a simplified version of the bilateral filter where the spatial smoothing sigma is set to infinity. The inner nested loop over a window can clearly be parallelized: computation of the exponent <code>std::exp(-diff * diff / sigma / sigma / 2)</code> can be done for each pixel independently, and there are SIMD vector instructions <code>_ZGVdN8v_expf@plt</code> and <code>_ZGVbN4v_expf@plt</code> on x64 architecture that do exactly that.</p>
+
+        <p>The full assembly produced with gcc v15 <code>-O3 -ffast-math -mavx2</code> can be found <a href="https://godbolt.org/z/YdjTf1Gv9" target="_blank">here</a>. It invokes <code>_ZGVdN8v_expf@plt</code>, and for the tail/remainder possibly calls <code>_ZGVbN4v_expf@plt</code> and 3 possible calls for <code>expf@plt</code>. Sounds great, right?</p>
+
+        <h3>The Compiler is Fragile</h3>
+
+        <p>Well, it turns out the gcc compiler is very sensitive. If we eliminate the <code>sum_weighted</code> variable and directly accumulate into <code>results[index_global]</code>, no SIMD is emitted: <a href="https://godbolt.org/z/nsnx5rqzx" target="_blank">see here</a>!</p>
+
+        <p>Importantly, if we switch the compiler to clang-21, neither version will produce optimized assembly: <a href="https://godbolt.org/z/9hqzTsvW5" target="_blank">see here</a>.</p>
+
+        <div class="benchmark">
+            <h3>Benchmark Results</h3>
+            <p>How does it affect runtime? On my 13th Gen Intel(R) Core(TM) i5-13400:</p>
+            <ul style="margin-left: 2em;">
+                <li>GCC-15 SIMD version: <strong>15 seconds</strong></li>
+                <li>GCC-15 non-SIMD version: <strong>34 seconds</strong></li>
+                <li>Clang binaries: <strong>~30 seconds</strong></li>
+                <li>Mac M1 (all versions): <strong>~32 seconds</strong></li>
+            </ul>
+        </div>
+
+        <p>This is, of course, not acceptable. The algorithm is not complex; the loops are straightforward, and sliding window algorithms have been used for several decades in various fields.</p>
+
+        <h2>The Solution (For Now)</h2>
+
+        <p>Right now, the only way to resolve the problem is to use SIMD intrinsics or inline assembly with support for multiple architectures—and that's what, for example, the ffmpeg project does. But this does reduce code portability and maintainability. One may hope that in the next iterations/versions of the compiler, the handling of SIMD will improve.</p>
+
+        <div class="note">
+            <strong>Side Note on Rust:</strong> Re-writing the same code in Rust revealed that Rust doesn't emit SIMD exponent instructions (as expected, since after all, clang and Rust share the same LLVM backend). However, the Rust code performs very differently on Intel CPU vs. Mac: the same code runs 49 seconds and 28 seconds on the Intel CPU and M1 Mac respectively, despite the fact that both non-SIMD versions of the C++ code give roughly the same timing (32-34 seconds).
+        </div>
+
+        <div class="conclusion">
+            <h2>Conclusion</h2>
+            <p>While modern compilers are incredibly sophisticated, SIMD optimization remains an area where they fall short. For performance-critical code in scientific computing, multimedia processing, and other domains that benefit from vectorization, developers may still need to resort to hand-written SIMD intrinsics or assembly to achieve optimal performance.</p>
+            
+            <p>This explains why projects like ffmpeg continue to invest in hand-optimized assembly code. it's a necessary compromise until compilers can reliably handle these optimizations automatically.</p>
+        </div>
+    </article>
+</body>
+</html>

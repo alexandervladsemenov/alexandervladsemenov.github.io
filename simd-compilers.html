@@ -331,7 +331,7 @@ int main(int argc, char **argv) {
     return 0;
 }</code></pre>
 
-        <p>This is a simplified version of the bilateral filter where the spatial smoothing sigma is set to infinity. The inner nested loop over a window can clearly be parallelized: computation of the exponent <code>std::exp(-diff * diff / sigma / sigma / 2)</code> can be done for each pixel independently, and there are SIMD vector instructions <code>_ZGVdN8v_expf@plt</code> and <code>_ZGVbN4v_expf@plt</code> on x64 architecture that do exactly that.</p>
+        <p>This is a simplified version of the bilateral filter where the spatial smoothing sigma is set to infinity. The inner nested loop over a window can clearly be parallelized: computation of the exponent <code>std::exp(-diff * diff / sigma / sigma / 2)</code> can be done for each pixel independently, and there are SIMD vectorized calls <code>_ZGVdN8v_expf@plt</code> and <code>_ZGVbN4v_expf@plt</code> on x64 architecture that do exactly that.</p>
 
         <p>The full assembly produced with gcc v15 <code>-O3 -ffast-math -mavx2</code> can be found <a href="https://godbolt.org/z/YdjTf1Gv9" target="_blank">here</a>. It invokes <code>_ZGVdN8v_expf@plt</code>, and for the tail/remainder possibly calls <code>_ZGVbN4v_expf@plt</code> and 3 possible calls for <code>expf@plt</code>. Sounds great, right?</p>
 
@@ -339,7 +339,7 @@ int main(int argc, char **argv) {
 
         <p>Well, it turns out the gcc compiler is very sensitive. If we eliminate the <code>sum_weighted</code> variable and directly accumulate into <code>results[index_global]</code>, no SIMD is emitted: <a href="https://godbolt.org/z/nsnx5rqzx" target="_blank">see here</a>!</p>
 
-        <p>Importantly, if we switch the compiler to clang-21, neither version will produce optimized assembly: <a href="https://godbolt.org/z/9hqzTsvW5" target="_blank">see here</a>.</p>
+        <p>Importantly, if we switch the compiler to clang-21, neither version will produce assembly with no vectorized exponents: <a href="https://godbolt.org/z/9hqzTsvW5" target="_blank">see here</a>.</p>
 
         <div class="benchmark">
             <h3>Benchmark Results</h3>
@@ -356,7 +356,7 @@ int main(int argc, char **argv) {
 
         <h2>The Solution (For Now)</h2>
 
-        <p>Right now, the only way to resolve the problem is to use SIMD intrinsics or inline assembly with support for multiple architectures—and that's what, for example, the ffmpeg project does. But this does reduce code portability and maintainability. One may hope that in the next iterations/versions of the compiler, the handling of SIMD will improve.</p>
+        <p>Right now, the only way to resolve the problem is to use SIMD intrinsics or inline assembly with support for multiple architectures which is what, for example, the ffmpeg project does. But this does reduce code portability and maintainability. One may hope that in the next iterations/versions of the compiler, the handling of SIMD will improve.</p>
 
         <div class="note">
             <strong>Side Note on Rust:</strong> Re-writing the same code in Rust revealed that Rust doesn't emit SIMD exponent instructions (as expected, since after all, clang and Rust share the same LLVM backend). However, the Rust code performs very differently on Intel CPU vs. Mac: the same code runs 49 seconds and 28 seconds on the Intel CPU and M1 Mac respectively, despite the fact that both non-SIMD versions of the C++ code give roughly the same timing (32-34 seconds).

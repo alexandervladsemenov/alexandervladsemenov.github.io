@@ -236,7 +236,7 @@ void test(const int *a, const int *b, int *c, size_t N)
         ; ... repeat 2 more times ...
 </code></pre>
 
-        <p>The output seems complicated, but it's really not. The L3 block of the unoptimized assembly is now represented by blocks <code>.L4</code>, <code>.L7</code>, and <code>.L5</code>. Instead of standard <code>add</code> and <code>mov</code> calls, we have SIMD instructions like <code>vmovdqu</code> and <code>vpaddd</code>. What are those? And why are they better?</p>
+        <p>The output seems complicated, but it's really not. The <code>.L3</code> block of the unoptimized assembly is now represented by blocks <code>.L4</code>, <code>.L7</code>, and <code>.L5</code>. Instead of standard <code>mov</code> and <code>add</code> instructions, we have SIMD instructions like <code>vmovdqu</code> and <code>vpaddd</code>. What are those? And why are they better?</p>
 
         <div class="note">
             <strong>Key Insight:</strong> Instead of computing the sum for each integer element <code>i</code> separately, we do it once for 4 or 8 integers at once. Block <code>.L5</code> loads 8 integers into the <code>ymm0</code> register (which is 256 bits wide), adds them together, and this is done for the first N – mod(N,8) integers. The remaining mod(N,8) elements (the tail) are processed by block <code>.L4</code> using a 128-bit register (4 integers at once), and finally the remainder mod(mod(N,8),4) is processed by block <code>.L7</code>, each integer separately.

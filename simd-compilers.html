@@ -541,7 +541,10 @@ int main(int argc, char **argv) {
             instead, a pre-computed lookup table and Taylor expansion are used to approximate exponents and speed up the
             process. However, the
             purpose of this example is to illustrate compiler behavior rather than to provide an optimal implementation
-            of the bilateral filter.
+            of the bilateral filter. Another topic we have not discussed here is that instruction scheduling and
+            vectorization may introduce additional temporary variables or use wider registers (like SIMD registers),
+            increasing register pressure and potentially spilling more data to the stack or requiring more stack space.
+            In fact, optimized assembly produced by gcc uses quite a few stack variables and increase memory footprint.
         </div>
         <h2>The Solution (For Now)</h2>
 
